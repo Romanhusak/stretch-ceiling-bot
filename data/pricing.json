@@ -1,22 +1,28 @@
 {
   "currency": "грн",
-  "material": {
-    "sheetPerSquareMeter": 320,
-    "profilePerMeter": 90
+  "canvas": {
+    "width320": 340,
+    "width400": 360,
+    "width600": 380
   },
-  "labor": {
-    "installationPerSquareMeter": 180,
-    "baseCornerIncluded": 4,
-    "extraCorner": 70
+  "profiles": {
+    "profileH": 130,
+    "insertStrip": 70,
+    "shadowProfile": 400,
+    "noInsertProfile": 250,
+    "floatingProfile": 500
   },
   "lighting": {
-    "spotlightInstallation": 180,
-    "chandelierInstallation": 350,
-    "ledStripPerMeter": 220
+    "spotlightInstallation": 300,
+    "chandelierInstallation": 400
+  },
+  "curtain": {
+    "q7": 1400,
+    "q10": 1500,
+    "ending": 300
   },
   "extras": {
-    "curtainRailPerMeter": 240,
-    "pipeBypass": 130,
-    "dismantlingPerSquareMeter": 80
+    "extraCorner": 100,
+    "pipeBypass": 200
   }
 }

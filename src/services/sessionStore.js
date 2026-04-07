@@ -7,6 +7,7 @@ function createEmptySession() {
     answers: {},
     rooms: [],
     currentRoomNumber: 1,
+    phoneNumber: null,
     mode: 'idle',
     adminEditKey: null
   };

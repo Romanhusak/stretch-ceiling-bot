@@ -64,6 +64,7 @@ async function getDatabase() {
           username TEXT,
           first_name TEXT,
           last_name TEXT,
+          phone_number TEXT,
           answers_json TEXT NOT NULL,
           items_json TEXT NOT NULL,
           total REAL NOT NULL,
@@ -71,6 +72,12 @@ async function getDatabase() {
           created_at TEXT NOT NULL
         )
       `);
+
+      const columns = mapResultRows(db.exec('PRAGMA table_info(quotes)'));
+      const hasPhoneNumber = columns.some((column) => column.name === 'phone_number');
+      if (!hasPhoneNumber) {
+        db.run('ALTER TABLE quotes ADD COLUMN phone_number TEXT');
+      }
 
       await persistDatabase(db);
       return db;
@@ -80,7 +87,7 @@ async function getDatabase() {
   return dbPromise;
 }
 
-async function saveQuote({ chatId, user, answers, estimate }) {
+async function saveQuote({ chatId, user, phoneNumber, answers, estimate }) {
   const db = await getDatabase();
   const createdAt = new Date().toISOString();
 
@@ -92,12 +99,13 @@ async function saveQuote({ chatId, user, answers, estimate }) {
         username,
         first_name,
         last_name,
+        phone_number,
         answers_json,
         items_json,
         total,
         currency,
         created_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `,
     [
       String(chatId),
@@ -105,6 +113,7 @@ async function saveQuote({ chatId, user, answers, estimate }) {
       user?.username || null,
       user?.first_name || null,
       user?.last_name || null,
+      phoneNumber || null,
       JSON.stringify(answers),
       JSON.stringify(estimate.rooms),
       estimate.total,
@@ -131,7 +140,7 @@ async function getQuoteStats() {
 async function getLatestQuotes(limit = 5) {
   const db = await getDatabase();
   return mapResultRows(db.exec(`
-    SELECT id, total, currency, created_at, first_name, username
+    SELECT id, total, currency, created_at, first_name, username, phone_number
     FROM quotes
     ORDER BY id DESC
     LIMIT ${Number(limit)}
@@ -191,7 +200,7 @@ async function exportQuotesToXlsx() {
   ensureDirectories();
   const db = await getDatabase();
   const rows = mapResultRows(db.exec(`
-    SELECT id, created_at, first_name, last_name, username, user_id, chat_id, total, currency, answers_json, items_json
+    SELECT id, created_at, first_name, last_name, username, user_id, chat_id, phone_number, total, currency, answers_json, items_json
     FROM quotes
     ORDER BY id DESC
   `));
@@ -202,17 +211,21 @@ async function exportQuotesToXlsx() {
     const answers = JSON.parse(row.answers_json || '{}');
     const rooms = Array.isArray(answers.rooms) ? answers.rooms : [];
     return {
-      id: row.id,
-      created_at: row.created_at,
-      first_name: row.first_name,
-      last_name: row.last_name,
-      username: row.username,
-      user_id: row.user_id,
-      chat_id: row.chat_id,
-      rooms_count: rooms.length,
-      total: row.total,
-      currency: row.currency,
-      rooms_json: JSON.stringify(rooms)
+      'ID заявки': row.id,
+      'Дата': row.created_at,
+      "Ім'я": row.first_name || '',
+      'Прізвище': row.last_name || '',
+      'Username': row.username || '',
+      'Телефон': row.phone_number || '',
+      'Telegram ID': row.user_id || '',
+      'Chat ID': row.chat_id || '',
+      'Кількість кімнат': rooms.length,
+      'Сума': row.total,
+      'Валюта': row.currency,
+      'Кімнати': rooms.map((room, index) => {
+        const canvasType = room.canvasType ? `${room.canvasType} м` : 'невідомо';
+        return `Кімната ${index + 1}: ${room.area || 0} м2, полотно ${canvasType}`;
+      }).join(' | ')
     };
   });
 

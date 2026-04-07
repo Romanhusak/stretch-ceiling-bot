@@ -35,6 +35,15 @@ function isValidPositiveNumber(value) {
   return Number.isFinite(value) && value >= 0;
 }
 
+function normalizePhoneNumber(text) {
+  return String(text || '').trim().replace(/[^\d+]/g, '');
+}
+
+function isValidPhoneNumber(text) {
+  const normalized = normalizePhoneNumber(text);
+  return /^\+?\d{10,15}$/.test(normalized);
+}
+
 function buildStepPrompt(step, roomNumber) {
   return `Кімната ${roomNumber}\nКрок: ${step.label}\n${step.prompt}`;
 }
@@ -45,6 +54,7 @@ function resetCalculationState(session) {
   session.answers = {};
   session.rooms = [];
   session.currentRoomNumber = 1;
+  session.phoneNumber = null;
   session.mode = 'idle';
   session.adminEditKey = null;
 }
@@ -55,17 +65,21 @@ function isAdmin(ctx) {
 
 function formatKeyLabel(key) {
   const labels = {
-    'material.sheetPerSquareMeter': 'Полотно за м2',
-    'material.profilePerMeter': 'Профіль за м',
-    'labor.installationPerSquareMeter': 'Монтаж за м2',
-    'labor.baseCornerIncluded': 'Кутів включено',
-    'labor.extraCorner': 'Додатковий кут',
+    'canvas.width320': 'Полотно 3.20 м',
+    'canvas.width400': 'Полотно 4 м',
+    'canvas.width600': 'Полотно 6 м',
+    'profiles.profileH': 'Профіль H',
+    'profiles.insertStrip': 'Вставка',
+    'profiles.shadowProfile': 'Тіньовий профіль',
+    'profiles.noInsertProfile': 'Безвставочний профіль',
+    'profiles.floatingProfile': 'Парящий профіль',
     'lighting.spotlightInstallation': 'Точковий світильник',
     'lighting.chandelierInstallation': 'Люстра',
-    'lighting.ledStripPerMeter': 'LED-підсвітка за м',
-    'extras.curtainRailPerMeter': 'Карниз за м',
+    'curtain.q7': 'Гардина Q7',
+    'curtain.q10': 'Гардина Q10',
+    'curtain.ending': 'Закінчення гардини',
+    'extras.extraCorner': 'Додатковий кут',
     'extras.pipeBypass': 'Обхід труби',
-    'extras.dismantlingPerSquareMeter': 'Демонтаж за м2'
   };
 
   return labels[key] || key;
@@ -141,6 +155,13 @@ function buildRoomCompleteKeyboard() {
   ]);
 }
 
+function buildPhoneRequestKeyboard() {
+  return Markup.keyboard([
+    [Markup.button.contactRequest('Поділитися номером')],
+    ['Пропустити']
+  ]).resize();
+}
+
 async function showAdminMenu(ctx, text = 'Адмін-меню. Оберіть дію.') {
   if ('editMessageText' in ctx && ctx.callbackQuery?.message) {
     await ctx.editMessageText(text, buildAdminMainKeyboard());
@@ -169,7 +190,8 @@ async function buildStatsMessage() {
 
   for (const quote of latest) {
     const customerName = quote.first_name || quote.username || 'Без імені';
-    lines.push(`- #${quote.id} ${customerName}: ${quote.total} ${quote.currency} (${quote.created_at})`);
+    const phone = quote.phone_number || 'не вказано';
+    lines.push(`- #${quote.id} ${customerName}, тел: ${phone}, ${quote.total} ${quote.currency} (${quote.created_at})`);
   }
 
   return lines.join('\n');
@@ -189,6 +211,7 @@ async function notifyAdminsAboutQuote(ctx, estimate, rooms) {
     `Клієнт: ${customer}`,
     `Username: ${ctx.from?.username ? `@${ctx.from.username}` : 'немає'}`,
     `Telegram ID: ${ctx.from?.id || 'невідомо'}`,
+    `Телефон: ${ctx.sessionPhoneNumber || 'не вказано'}`,
     `Кімнат: ${rooms.length}`,
     `Сума: ${estimate.total} ${estimate.currency}`
   ];
@@ -209,25 +232,26 @@ async function askCurrentStep(ctx, session) {
 
 async function startCalculation(ctx) {
   const session = resetSession(ctx.chat.id);
-  session.active = true;
-  session.mode = 'calculator';
+  session.mode = 'phone_request';
   session.currentRoomNumber = 1;
 
   await ctx.reply(
     [
       'Починаємо новий розрахунок.',
-      'Надсилайте тільки числа. Десяткові можна вводити через крапку або кому.',
-      '',
-      buildStepPrompt(steps[0], session.currentRoomNumber)
+      'Спочатку надішліть номер телефону або натисніть "Пропустити".'
     ].join('\n')
+    ,
+    buildPhoneRequestKeyboard()
   );
 }
 
 async function finalizeCalculation(ctx, session) {
   const estimate = calculateEstimate(session.rooms);
+  ctx.sessionPhoneNumber = session.phoneNumber;
   await saveQuote({
     chatId: ctx.chat.id,
     user: ctx.from,
+    phoneNumber: session.phoneNumber,
     answers: { rooms: session.rooms },
     estimate
   });
@@ -266,6 +290,19 @@ async function startNextRoom(ctx, session) {
 
   await ctx.reply(`Переходимо до кімнати ${session.currentRoomNumber}.`);
   await askCurrentStep(ctx, session);
+}
+
+async function beginRoomQuestions(ctx, session) {
+  session.active = true;
+  session.mode = 'calculator';
+  await ctx.reply(
+    [
+      'Надсилайте тільки числа. Десяткові можна вводити через крапку або кому.',
+      '',
+      buildStepPrompt(steps[0], session.currentRoomNumber)
+    ].join('\n'),
+    Markup.removeKeyboard()
+  );
 }
 
 bot.start(async (ctx) => {
@@ -478,6 +515,17 @@ bot.action('calc:finish', async (ctx) => {
   await finalizeCalculation(ctx, session);
 });
 
+bot.on('contact', async (ctx) => {
+  const session = getSession(ctx.chat.id);
+
+  if (session.mode !== 'phone_request') {
+    return;
+  }
+
+  session.phoneNumber = ctx.message.contact.phone_number || null;
+  await beginRoomQuestions(ctx, session);
+});
+
 bot.on('text', async (ctx) => {
   if (ctx.message.text.startsWith('/')) {
     return;
@@ -512,6 +560,24 @@ bot.on('text', async (ctx) => {
     return;
   }
 
+  if (session.mode === 'phone_request') {
+    const text = ctx.message.text.trim();
+    if (text.toLowerCase() === 'пропустити') {
+      session.phoneNumber = null;
+      await beginRoomQuestions(ctx, session);
+      return;
+    }
+
+    if (!isValidPhoneNumber(text)) {
+      await ctx.reply('Надішліть коректний номер телефону, поділіться контактом або натисніть "Пропустити".');
+      return;
+    }
+
+    session.phoneNumber = normalizePhoneNumber(text);
+    await beginRoomQuestions(ctx, session);
+    return;
+  }
+
   if (session.mode === 'room_complete') {
     await ctx.reply('Натисніть кнопку: додати ще кімнату або завершити замовлення.');
     return;
@@ -523,7 +589,16 @@ bot.on('text', async (ctx) => {
   }
 
   const currentStep = steps[session.stepIndex];
-  const value = normalizeNumber(ctx.message.text);
+  let value = normalizeNumber(ctx.message.text);
+
+  if (currentStep.key === 'canvasType') {
+    const canvasValue = Number(String(ctx.message.text).trim().replace(',', '.'));
+    if (![3.2, 4, 6].includes(canvasValue)) {
+      await ctx.reply('Тип полотна може бути тільки 3.2, 4 або 6.');
+      return;
+    }
+    value = canvasValue;
+  }
 
   if (!isValidPositiveNumber(value)) {
     await ctx.reply(`Не вдалося розпізнати число.\n${buildStepPrompt(currentStep, session.currentRoomNumber)}`);
