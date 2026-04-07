@@ -1,0 +1,8 @@
+node_modules/
+.env
+npm-debug.log*
+data/*.sqlite
+data/*.db
+data/*.db-journal
+data/exports/*.csv
+data/exports/*.xlsx
